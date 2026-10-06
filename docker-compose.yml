@@ -80,6 +80,14 @@ services:
   # (or explicitly set DEV_LOGIN_BYPASS=true for local development only -
   # refused outright if HR_BACKEND_ENV=production).
   hr-backend:
+    # Opt-in only: excluded from a plain `docker compose up`/`up -d` (with
+    # no service name) unless you pass `--profile hr-backend` explicitly.
+    # It also needs HR_SESSION_SECRET set in .env before it will even start
+    # (see below) - without a profile gate, a missing secret meant this
+    # service crash-looped under `restart: unless-stopped` every time any
+    # `docker compose up` ran, even when you only wanted smart-mcp-server.
+    profiles:
+      - hr-backend
     build:
       context: .
       dockerfile: Dockerfile
