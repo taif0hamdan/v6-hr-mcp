@@ -34,6 +34,7 @@ def main():
     required_modules = [
         "fastmcp",
         "sqlalchemy",
+        "sqlparse",
         "yaml",
         "dotenv",
         "openai",
@@ -62,7 +63,9 @@ def main():
         "db.adapter",
         "nlp.query_parser",
         "mcp_server.tools",
+        "mcp_server.concepts",
         "utils.schema",
+        "errors",
     ]
     
     for module in project_modules:

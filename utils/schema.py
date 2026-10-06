@@ -129,10 +129,15 @@ SQL SAFETY RULES:
 =================
 1. ONLY generate SELECT queries (read-only)
 2. NEVER use DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE, CREATE
-3. Always include LIMIT clause (max 1000 rows)
+3. Cap the result size using the DATABASE TYPE's own syntax (max 1000 rows):
+   SQLite/MySQL/PostgreSQL -> "LIMIT n"; Oracle -> "FETCH FIRST n ROWS ONLY"
+   (Oracle has no LIMIT keyword - using it will fail with ORA-00933).
+   A server-side cap is applied automatically if you omit this, but prefer
+   to include the dialect-correct clause yourself.
 4. Use table aliases for clarity in JOINs
 5. Handle NULL values appropriately
-6. Use proper date functions for the database type
+6. Use proper date functions for the database type (e.g. Oracle: SYSDATE /
+   ADD_MONTHS, not SQLite's DATE('now', ...))
 7. Validate column and table names exist in schema
 8. Return ONLY the SQL query, no explanations or markdown
 9. If query is unsafe or impossible, return: ERROR: [reason]

@@ -9,13 +9,13 @@ import yaml
 import logging
 import json
 from dotenv import load_dotenv
-from openai import OpenAI
 
 # Ensure we can import from local modules
 sys.path.append(os.getcwd())
 
 from db.adapter import DatabaseAdapter
 from utils.schema import schema_to_json
+from utils.llm_client import build_openai_client, resolve_llm_settings
 
 # Configure logging
 logging.basicConfig(
@@ -34,29 +34,16 @@ def load_config(config_path: str = "config.yaml") -> dict:
         sys.exit(1)
 
 def initialize_llm(config: dict) -> tuple:
-    """Initialize OpenAI client and get model info."""
+    """Initialize OpenAI-compatible client and get model info."""
     llm_config = config.get("llm", {})
 
     # Load .env first (takes priority)
     load_dotenv()
 
-    # Priority: .env -> config.yaml
-    api_key = os.getenv("LLM_API_KEY") or llm_config.get("api_key_env")
+    settings = resolve_llm_settings(llm_config)
+    client = build_openai_client(settings)
 
-    if not api_key:
-        logger.error("No API key found in .env (LLM_API_KEY) or config.yaml (llm.api_key_env)")
-        sys.exit(1)
-
-    api_base = os.getenv("LLM_API_BASE") or llm_config.get("api_base")
-    model = os.getenv("LLM_MODEL") or llm_config.get("model") or "gpt-3.5-turbo"
-    
-    client_kwargs = {"api_key": api_key}
-    if api_base:
-        client_kwargs["base_url"] = api_base
-
-    client = OpenAI(**client_kwargs)
-
-    return client, model
+    return client, settings["model"]
 
 def generate_schema_description(client, model, db_schema: dict) -> str:
     """Generate YAML schema description using LLM."""

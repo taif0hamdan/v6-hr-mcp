@@ -1,0 +1,115 @@
+# Air-gapped-friendly deployment. The database is NEVER baked into the
+# image: it is mounted read-only from the host at /data. Documentation
+# ("concepts") is likewise mounted read-only.
+#
+# Network note: if your database is SQLite (mounted from /data, no network
+# needed) and your LLM server is reachable over a Docker network you
+# control (e.g. a sibling container on `llm_net`), you can run this fully
+# network-isolated from the outside world with:
+#   docker compose run --network none smart-mcp-server
+# or by setting `network_mode: none` below and putting the LLM container on
+# the same user-defined bridge network instead of using host networking.
+# Leave the default bridge network in place if your LLM endpoint is only
+# reachable via the host (e.g. Ollama on localhost:11434) and you accept
+# that reduced isolation.
+
+services:
+  smart-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: smart-mcp-server:latest
+    env_file:
+      - .env
+    environment:
+      # ${VAR:-default} so a real DATABASE_URL in .env (e.g. a live Oracle/
+      # Postgres/MySQL connection string) flows through untouched; only
+      # falls back to the bundled-sqlite-volume default when .env doesn't
+      # set it at all.
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/db.sqlite}
+      DOCS_DIR: ${DOCS_DIR:-/app/database_docs}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
+      MCP_PORT: ${MCP_PORT:-8000}
+    volumes:
+      # Read-only database mount. Replace ./data/db.sqlite with your real
+      # database file - never baked into the image.
+      - ./data:/data:ro
+      # Read-only docs mount so concept docs can be edited/replaced without
+      # rebuilding the image.
+      - ./database_docs:/app/database_docs:ro
+    ports:
+      # Only meaningful when MCP_TRANSPORT=http; harmless otherwise.
+      - "${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+    extra_hosts:
+      # api.spec_source (or any other host-local service, e.g. an LLM dev
+      # server) often gets written as "localhost:PORT" - but inside this
+      # container, "localhost" means the CONTAINER itself, not your host
+      # machine. Point config.yaml's spec_source / LLM_BASE_URL at
+      # "host.docker.internal:PORT" instead of "localhost:PORT" when the
+      # service actually runs on the Docker host. Works out of the box on
+      # Docker Desktop (Mac/Windows); this line is what makes it resolve on
+      # Linux too.
+      - "host.docker.internal:host-gateway"
+    # TEMPORARILY DISABLED to isolate an "exec ... operation not permitted"
+    # failure at container start on this host - suspected to be this host's
+    # default container security policy (AppArmor/seccomp) interacting
+    # badly with one of these, given this host has already shown unusual
+    # MAC-style restrictions elsewhere (DNS writes blocked for the Docker
+    # daemon). Re-enable one at a time once the container runs, to find
+    # which one (if any) is the actual culprit:
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    # cap_drop:
+    #   - ALL
+    # security_opt:
+    #   - no-new-privileges:true
+    restart: unless-stopped
+    # See the network note above. Uncomment for full network isolation when
+    # your database is local SQLite and no LLM call is needed over this
+    # network interface:
+    # network_mode: none
+
+  # Separate REST backend (hr_backend/) - LDAP auth, committees, evaluation
+  # sessions, evaluations, results, unit reports. Independent of the MCP
+  # server above: same image/dependencies, different entrypoint/port/data.
+  # HR_SESSION_SECRET has no safe default and MUST be set in .env (generate
+  # with `python -c "import secrets; print(secrets.token_urlsafe(32))"`);
+  # the app refuses to start without it. LDAP_* are unset by default - the
+  # service will report auth as "not configured" until you provide them
+  # (or explicitly set DEV_LOGIN_BYPASS=true for local development only -
+  # refused outright if HR_BACKEND_ENV=production).
+  hr-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: smart-mcp-server:latest
+    entrypoint: ["uvicorn", "hr_backend.app:app", "--host", "0.0.0.0", "--port", "8090"]
+    env_file:
+      - .env
+    environment:
+      HR_BACKEND_DATABASE_URL: ${HR_BACKEND_DATABASE_URL:-sqlite:////hr_backend_data/hr_backend.db}
+      HR_API_BASE_URL: ${HR_API_BASE_URL:-http://192.168.27.31:9009}
+    volumes:
+      # The hr_backend app DB (users, committees, sessions, evaluations,
+      # results, cache snapshots) - a SEPARATE volume from the MCP
+      # server's /data mount above; this is app-owned read/write state,
+      # not a read-only mounted source database.
+      - ./hr_backend_data:/hr_backend_data
+    ports:
+      - "${HR_BACKEND_PORT:-8090}:8090"
+    extra_hosts:
+      # Same host.docker.internal caveat as the MCP server above - only
+      # relevant if LDAP_HOST/HR_API_BASE_URL point at a service running on
+      # the Docker HOST itself rather than a real LAN address.
+      - "host.docker.internal:host-gateway"
+    # Same temporary relaxation as smart-mcp-server above (see its comment)
+    # - re-enable one at a time once both containers run cleanly on this host:
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    # cap_drop:
+    #   - ALL
+    # security_opt:
+    #   - no-new-privileges:true
+    restart: unless-stopped

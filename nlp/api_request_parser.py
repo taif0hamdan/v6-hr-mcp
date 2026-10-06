@@ -8,7 +8,9 @@ import logging
 import json
 import re
 import yaml
-from openai import OpenAI
+from openai import APIConnectionError, APIError, APITimeoutError
+
+from utils.llm_client import build_extra_body, build_openai_client, disable_thinking_suffix, resolve_llm_settings
 from utils.schema import get_safety_rules
 
 logger = logging.getLogger(__name__)
@@ -29,32 +31,26 @@ class APIRequestParser:
         self.schema = schema
         self.unsafe_mode = unsafe_mode
 
-        import os
-
-        # Priority: .env -> config.yaml
-        api_key = os.getenv("LLM_API_KEY") or llm_config.get("api_key_env")
-        api_base = os.getenv("LLM_API_BASE") or llm_config.get("api_base")
-
-        client_kwargs = {"api_key": api_key}
-        if api_base:
-            client_kwargs["base_url"] = api_base
-
-        self.client = OpenAI(**client_kwargs)
-        self.model = os.getenv("LLM_MODEL") or llm_config.get("model") or "gpt-3.5-turbo"
-        self.temperature = float(os.getenv("LLM_TEMPERATURE") or llm_config.get("temperature") or 0.0)
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS") or llm_config.get("max_tokens") or 500)
+        settings = resolve_llm_settings(llm_config)
+        self.client = build_openai_client(settings)
+        self.model = settings["model"]
+        self.temperature = settings["temperature"]
+        self.max_tokens = settings["max_tokens"]
+        self.extra_body = build_extra_body(settings) or None
+        self.no_think_suffix = disable_thinking_suffix(settings)
 
     def parse(self, natural_language: str) -> Dict[str, Any]:
         """
         Convert natural language to API Request definition.
 
         Returns:
-            Dict with 'method', 'endpoint', 'params', 'body', 'success'
+            Dict with 'success' and either request fields, or 'error_code' + 'error'.
+            error_code is one of "LLM_UNAVAILABLE" | "QUERY_REJECTED" | "INTERNAL".
         """
         try:
-            prompt = self._build_prompt(natural_language)
+            prompt = self._build_prompt(natural_language) + self.no_think_suffix
 
-            response = self.client.chat.completions.create(
+            create_kwargs = dict(
                 model=self.model,
                 messages=[
                     {
@@ -67,7 +63,19 @@ class APIRequestParser:
                 max_tokens=self.max_tokens,
                 response_format={ "type": "json_object" }
             )
+            if self.extra_body:
+                create_kwargs["extra_body"] = self.extra_body
 
+            response = self.client.chat.completions.create(**create_kwargs)
+        except (APIConnectionError, APITimeoutError, APIError) as exc:
+            status_code = getattr(exc, "status_code", None)
+            logger.error("LLM call failed: %s (status_code=%s)", type(exc).__name__, status_code, exc_info=True)
+            return {"success": False, "error_code": "LLM_UNAVAILABLE", "error": "the configured LLM endpoint is unavailable", "natural_language": natural_language}
+        except Exception:
+            logger.error("Unexpected error calling the LLM", exc_info=True)
+            return {"success": False, "error_code": "INTERNAL", "error": "unexpected error while generating the API request", "natural_language": natural_language}
+
+        try:
             content = response.choices[0].message.content.strip()
             request_def = json.loads(content)
 
@@ -76,7 +84,8 @@ class APIRequestParser:
             if not self.unsafe_mode and method != "GET":
                 return {
                     "success": False,
-                    "error": f"Method {method} is not allowed in safe mode. Only GET requests are permitted.",
+                    "error_code": "QUERY_REJECTED",
+                    "error": f"method {method} is not allowed in safe mode; only GET requests are permitted",
                     "natural_language": natural_language
                 }
 
@@ -89,11 +98,12 @@ class APIRequestParser:
                 "natural_language": natural_language
             }
 
-        except Exception as e:
-            logger.error(f"API parsing failed: {e}")
+        except Exception:
+            logger.error("Failed to process LLM response", exc_info=True)
             return {
                 "success": False,
-                "error": str(e),
+                "error_code": "INTERNAL",
+                "error": "unexpected error while generating the API request",
                 "natural_language": natural_language
             }
 

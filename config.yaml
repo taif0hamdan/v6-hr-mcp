@@ -1,5 +1,7 @@
 # Smart MCP Server Configuration
-# Edit this file to configure your database connection and LLM settings
+# Edit this file to configure your database connection and LLM settings.
+# DATABASE_URL / DOCS_DIR / LLM_* env vars (see .env.example) always override
+# the values below - this file is the fallback for local/dev use.
 
 # Server Mode: "database" or "api"
 mode: "database"
@@ -7,17 +9,40 @@ mode: "database"
 # Database Configuration (Used when mode is "database")
 database:
   # Connection string format:
-  # SQLite: sqlite:///path/to/database.db
-  # PostgreSQL: postgresql://user:password@localhost:5432/dbname
-  # MySQL: mysql+pymysql://user:password@localhost:3306/dbname
+  # SQLite: sqlite:///path/to/database.db  (opened read-only automatically)
+  # PostgreSQL: postgresql://user:password@localhost:5432/dbname  (use a read-only DB user!)
+  # MySQL: mysql+pymysql://user:password@localhost:3306/dbname    (use a read-only DB user!)
+  # Oracle: oracle+oracledb://user:password@host:1521/service_name (use a read-only DB user!)
+  #
+  # anime.db / e-commerce templates below are TEST FIXTURES ONLY. Point this
+  # at your real database by setting DATABASE_URL (see .env.example) - no
+  # code changes are needed to switch databases.
+  #
+  # Do NOT put real credentials here - config.yaml is meant to be checked
+  # into version control. Set DATABASE_URL in your (gitignored) .env file
+  # instead; it always takes priority over this value.
   connection_string: "sqlite:///example.db"
   schema_cache_ttl: 3600
   max_rows: 1000
+  # Best-effort cap (seconds) on a single query_database execution.
+  statement_timeout_seconds: 15
 
 # API Configuration (Used when mode is "api")
 api:
-  # URL or local path to OpenAPI/Swagger spec (JSON or YAML)
-  spec_source: "https://petstore.swagger.io/v2/swagger.json"
+  # URL or local path to OpenAPI/Swagger spec (JSON or YAML).
+  # Air-gapped default: point this at a LOCAL file. A remote http(s) URL is
+  # refused unless allow_remote_spec is also set to true.
+  #
+  # Currently a local network URL (not air-gapped) - allow_remote_spec is
+  # set to true below to permit it. If this spec server only runs on your
+  # HOST machine (not inside the Docker network), "localhost" will NOT
+  # resolve to the host from inside the container - see the note in
+  # docker-compose.yml.
+  spec_source: "http://localhost:9009/openapi.json"
+
+  # Must be explicitly true to let spec_source be fetched over http(s).
+  # Leave false for air-gapped deployments.
+  allow_remote_spec: true
 
   # Allow non-GET requests (POST, PUT, DELETE)
   # WARNING: Enabling this allows the LLM to modify data!
@@ -38,13 +63,22 @@ api:
     location: "header"    # "header" or "query"
 
 # LLM Configuration
+# Air-gapped default: a local OpenAI-compatible endpoint, never
+# api.openai.com. Override with LLM_BASE_URL / LLM_MODEL / LLM_API_KEY env
+# vars (LLM_API_KEY is optional - most local servers don't check it).
 llm:
   provider: "openwebui"
-  api_base: "http://localhost:8080/api"
+  api_base: "http://localhost:8080/v1"
   api_key_env: "LLM_API_KEY"
   model: "llama3.1:latest"
   temperature: 0.0
   max_tokens: 500
+  # Request timeout (seconds). Raise for slow/CPU-partial local models.
+  timeout_seconds: 60
+  # Ollama-specific, optional - leave unset to use the server/model default.
+  # num_ctx: 16384
+  # Ollama-specific: suppress a reasoning model's <think> block.
+  disable_thinking: false
 
 # Safety Configuration (Database specific)
 safety:
@@ -60,6 +94,10 @@ safety:
     - "REVOKE"
 
 # Security Configuration
+# These are DEFENSE-IN-DEPTH toggles for the raw schema://database resource
+# and query_database's success responses only. Error messages NEVER expose
+# table/column names, SQL text, or secrets regardless of these settings -
+# that masking is unconditional (see errors.py).
 security:
   hide_database_details: true
   expose_sql: false
@@ -72,6 +110,4 @@ server:
   name: "smart-mcp-server"
   version: "1.0.0"
   description: "Intelligent Interface for Database and API"
-  enable_schema_endpoint: true
-  enable_examples_endpoint: true
   log_level: "INFO"

@@ -1,0 +1,99 @@
+# HR / Organization Database Documentation
+#
+# Unlike anime.yaml / e-commerce.yaml (synthetic TEMPLATE examples for a
+# different, unrelated test database), this file documents the ACTUAL
+# connected database (the Oracle instance configured via DATABASE_URL) -
+# table names, columns, and relationships below were verified directly
+# against it, not guessed.
+
+database_context:
+  description: "Organization/personnel management system for a government or military-style organization (UAE-based - note the Emirates ID field), tracking organizational structure, employees, ranks, designations, jobs, leave requests, and the application's own login accounts."
+
+  domain: "HR / Organizational Management (government/military personnel)"
+
+  business_concepts:
+    - "Organizational structure lives in divn_m (Division Master) as a hierarchy, not a flat list - every row has a divn_type of 'DEPT', 'UNIT', or 'SECTION'. A 'department' specifically means divn_type = 'DEPT', not every row in divn_m - a question about 'departments' should filter on that, not just count the whole table."
+    - "Employees (emp_m) belong to one division (divn_id) and hold one rank (rank_id)."
+    - "Ranks (rank_m) and designations (desig_m) are bilingual reference tables (English/Arabic) describing employee seniority/title."
+    - "Jobs (job_m) is a separate reference list of job titles (Arabic only in the current data)."
+    - "emp_m_active is a much wider (71-column) employee table/view with extended government-HR fields: nationality, passport, military id, grade, religion code, blood type, promotion dates, etc. Use emp_m for simple questions (name, division, rank); use emp_m_active only when one of those extended fields is actually needed."
+    - "users is a SEPARATE concept from emp_m - it is application login accounts (email, password_hash, role, manager_id, is_active), not personnel records. Its own 'department' column is a free-text field, unrelated to divn_m's structured hierarchy - the two should not be confused with each other."
+    - "Leave requests (leave_requests) reference users (employee_id, approved_by), not emp_m."
+    - "Tasks (tasks) is a minimal table (description, time_spent) with no foreign keys to anything else."
+    - "dbtools$execution_history and osddmw_diagrams are Oracle tooling artifacts (SQL Developer / Data Modeler metadata), not application data - ignore them for any business question."
+
+  tables:
+    divn_m:
+      description: "Division Master - the organizational hierarchy (departments, units, sections)."
+      notes: |
+        - divn_type: 'DEPT' | 'UNIT' | 'SECTION' - a "department" count/list means divn_type = 'DEPT'
+        - ctrl_divn_id: parent division id (hierarchy pointer), NULL for top-level entries
+        - hierarchy / divn_hierarchy: hierarchy depth / path
+        - divn_name_eng / divn_name_arb: English / Arabic names
+        - divn_status: only 'A' observed so far in this data (likely Active) - other values not confirmed
+
+    emp_m:
+      description: "Employee Master - core employee records."
+      notes: |
+        - emp_no: employee number (primary identifier)
+        - emp_name: Arabic name
+        - rank: denormalized rank text (see also rank_id -> rank_m for the structured version)
+        - divn_id -> divn_m.divn_id (foreign key, ON DELETE CASCADE)
+        - rank_id -> rank_m.rank_id
+
+    emp_m_active:
+      description: "Wide employee table/view (71 columns) with extended government/military HR fields - nationality, passport, military id, grade, religion, blood type, promotion dates, and more."
+      notes: "Prefer emp_m for simple questions; use this only when a question needs one of the extended fields that only exist here."
+
+    rank_m:
+      description: "Rank reference list, bilingual."
+      notes: "rank_desc_eng / rank_desc_arb - e.g. rank_id 1 = 'CEO'."
+
+    desig_m:
+      description: "Designation reference list."
+      notes: "desig_id, designation (Arabic text in current data)."
+
+    job_m:
+      description: "Job title reference list."
+      notes: "job_id, job_title_arb (Arabic only in current data)."
+
+    users:
+      description: "Application login accounts - NOT personnel/employee records."
+      notes: |
+        - email, password_hash, role, is_active (a NUMBER, not a native boolean - treat 1/0 as true/false)
+        - manager_id -> users.user_id (self-referencing - reporting line within the app's own accounts, separate from emp_m/divn_m)
+        - department: free-text field, independent of divn_m's structured hierarchy
+
+    leave_requests:
+      description: "Leave requests submitted by application users."
+      notes: |
+        - employee_id -> users.user_id (NOT emp_m)
+        - approved_by -> users.user_id
+        - status, start_date, end_date, reason (exact status values not yet confirmed - don't assume e.g. 'pending'/'approved' without checking)
+        - currently 0 rows in this database - an empty result here is correct, not an error
+
+    tasks:
+      description: "Minimal task list."
+      notes: "task_id, description, time_spent, created_at only - no foreign keys to any other table. Currently 0 rows."
+
+    dbtools$execution_history:
+      description: "Oracle SQL Developer internal tooling table - not business data."
+      notes: "Ignore for business questions."
+
+    osddmw_diagrams:
+      description: "Oracle SQL Developer Data Modeler diagram metadata - not business data."
+      notes: "Stores ER-diagram layout/design metadata, not application records."
+
+  common_queries:
+    - "How many departments are there? -> COUNT(*) FROM divn_m WHERE divn_type = 'DEPT'"
+    - "List all divisions/units/sections -> SELECT * FROM divn_m, optionally filtered by divn_type"
+    - "How many employees are in a given division? -> JOIN emp_m to divn_m on divn_id"
+    - "What rank does an employee hold? -> JOIN emp_m to rank_m on rank_id"
+    - "List leave requests for a user -> SELECT * FROM leave_requests WHERE employee_id = <users.user_id>"
+    - "Who are the application users with a given role? -> SELECT * FROM users WHERE role = '...'"
+
+  conventions:
+    languages: "Most reference/master tables carry both English and Arabic text columns (_eng/_arb suffixes); emp_m_active and job_m currently only have Arabic text populated."
+    department_ambiguity: "'Department' is ambiguous here: in divn_m it means divn_type = 'DEPT' (one level of the org hierarchy); in users it is an unrelated free-text column. Default to divn_m.divn_type = 'DEPT' for an HR/org-structure question; ask if genuinely unclear."
+    booleans: "is_active (users) is a NUMBER, not a native boolean - treat 1/0 as true/false."
+    empty_tables: "leave_requests and tasks are currently empty (0 rows) in this database - a query against them correctly returns no results, that is not an error."

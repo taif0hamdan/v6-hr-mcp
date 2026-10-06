@@ -1,0 +1,44 @@
+# Never let the database, secrets, or local venv/cache noise enter the
+# build context (defense in depth - multi-stage build already wouldn't ship
+# them, but they should never even reach the Docker daemon).
+*.db
+*.sqlite
+*.sqlite3
+data/
+.env
+.env.*
+!.env.example
+
+# NOTE: wheels/ is intentionally NOT excluded here. The build stage needs it
+# in the build context to support fully offline builds
+# (scripts/download_wheels.sh + `pip install --no-index --find-links=wheels`);
+# it is never copied into the final image (see Dockerfile's final stage),
+# so it cannot end up in the shipped image regardless.
+
+.git/
+.gitignore
+.github/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Docs/examples not needed inside the image (database_docs/ IS needed and is
+# copied explicitly by the Dockerfile).
+docs/
+example_database.py
+example_anime_database.py
+test_setup.py
+test_error_handling.py
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

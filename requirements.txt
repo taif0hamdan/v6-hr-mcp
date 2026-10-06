@@ -1,35 +1,59 @@
 # Smart MCP Server Dependencies
+#
+# All versions are pinned for reproducible, air-gapped builds. On a
+# connected machine, run `scripts/download_wheels.sh` to pre-fetch these as
+# wheels into ./wheels/ for an offline `docker build` (see Dockerfile).
+#
+# If a pin below does not resolve in your environment, bump it to the
+# nearest compatible release available to you and re-run
+# scripts/download_wheels.sh - do not relax pins to unbounded ">=" ranges.
 
-# FastMCP Framework (latest v2.x)
-fastmcp>=2.0.0
+# FastMCP Framework (2.x)
+fastmcp==2.3.4
 
 # Database Support
-sqlalchemy>=2.0.0
+sqlalchemy==2.0.35
+# SQLAlchemy's own install_requires pulls this in on x86_64/aarch64/etc for
+# Python <3.13, but cross-platform `pip download --platform ...` doesn't
+# reliably resolve it (a known pip limitation: --platform affects wheel-tag
+# matching, not PEP 508 marker evaluation) - pinned explicitly so it's never
+# silently missing from an offline wheels/ bundle.
+greenlet==3.2.5
 # Database drivers (install as needed):
-# MySQL/MariaDB:
-pymysql>=1.1.0
-# PostgreSQL:
-psycopg2-binary>=2.9.9
-# SQL Server:
-pyodbc>=5.0.0
-# Oracle:
-# cx-oracle>=8.3.0  # Uncomment if using Oracle
+pymysql==1.1.1
+psycopg2-binary==2.9.13
+pyodbc==5.2.0
+# Oracle - pure Python driver (thin mode), no Oracle Instant Client needed;
+# used by connection strings of the form oracle+oracledb://user:pass@host:port/service
+oracledb==2.4.1
 
-# LLM Integration
-openai>=1.12.0  # Works with OpenAI-compatible APIs
-anthropic>=0.18.0  # Optional: for Claude
-httpx>=0.27.0  # HTTP client
+# Read-only SQL validation (second, independent layer before execution)
+sqlparse==0.5.1
+
+# LLM Integration (OpenAI-compatible client; works against any local
+# OpenAI-compatible server - see LLM_BASE_URL in .env.example)
+openai==1.56.0
+httpx==0.28.1
 
 # Configuration & Utilities
-pyyaml>=6.0.1
-python-dotenv>=1.0.0
-pydantic>=2.6.0
+pyyaml==6.0.2
+python-dotenv==1.1.1
+pydantic==2.9.2
 
 # Date parsing
-python-dateutil>=2.8.2
+python-dateutil==2.9.0.post0
 
 # Logging & Development
-colorama>=0.4.6  # Colored terminal output
+colorama==0.4.6  # Colored terminal output
 
 # API Mode Dependencies
-requests>=2.31.0
+requests==2.32.3
+
+# HR Integration Backend (hr_backend/) - separate REST app alongside the
+# MCP server: LDAP auth, committees/sessions/evaluations/results, unit
+# reports. fastapi/uvicorn are already pulled in transitively by fastmcp;
+# pinned explicitly here since hr_backend depends on them directly.
+fastapi==0.142.2
+uvicorn==0.54.0
+ldap3==2.9.1
+itsdangerous==2.2.0

@@ -17,16 +17,21 @@ logger = logging.getLogger(__name__)
 class APIAdapter:
     """Adapter for interacting with APIs defined by OpenAPI/Swagger specs."""
 
-    def __init__(self, spec_source: str, auth_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, spec_source: str, auth_config: Optional[Dict[str, Any]] = None, allow_remote_spec: bool = False):
         """
         Initialize API adapter.
 
         Args:
             spec_source: URL or file path to the OpenAPI specification
             auth_config: Authentication configuration (type, token, key_location, etc.)
+            allow_remote_spec: must be explicitly True to fetch spec_source over
+                http(s). Defaults to False so air-gapped deployments can't
+                accidentally reach out to the network; set via
+                api.allow_remote_spec in config.yaml or API_ALLOW_REMOTE_SPEC=true.
         """
         self.spec_source = spec_source
         self.auth_config = auth_config or {}
+        self.allow_remote_spec = allow_remote_spec
         self.spec: Dict[str, Any] = {}
         self.base_url: str = ""
         self.paths: Dict[str, Any] = {}
@@ -35,11 +40,19 @@ class APIAdapter:
     def load_spec(self) -> None:
         """Load and parse the OpenAPI specification."""
         try:
-            logger.info(f"Loading OpenAPI spec from: {self.spec_source}")
+            is_remote = self.spec_source.startswith(('http://', 'https://'))
+            if is_remote and not self.allow_remote_spec:
+                raise RuntimeError(
+                    "spec_source is a remote URL but remote spec fetching is disabled. "
+                    "Set api.allow_remote_spec: true (or API_ALLOW_REMOTE_SPEC=true) to allow it, "
+                    "or point spec_source at a local OpenAPI file instead for air-gapped operation."
+                )
+
+            logger.info("Loading OpenAPI spec (remote=%s)", is_remote)
 
             content = ""
-            if self.spec_source.startswith(('http://', 'https://')):
-                response = requests.get(self.spec_source)
+            if is_remote:
+                response = requests.get(self.spec_source, timeout=30)
                 response.raise_for_status()
                 content = response.text
             else:
